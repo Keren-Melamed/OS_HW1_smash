@@ -7,6 +7,10 @@
 #include <iomanip>
 #include "Commands.h"
 
+//I added this to use PATH_MAX
+#include <limits.h>
+
+
 using namespace std;
 
 const std::string WHITESPACE = " \n\r\t\f\v";
@@ -74,6 +78,64 @@ void _removeBackgroundSign(char *cmd_line) {
 }
 
 // TODO: Add your implementation for classes in Commands.h 
+
+pid_t Command::getSmashPid() const {
+    //getpid is always successful
+    return getpid();
+}
+
+ShowPidCommand::ShowPidCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
+
+void ShowPidCommand::execute() {
+    //getpid is always successful
+    std::cout << "smash pid is " << getSmashPid() << std::endl;
+}
+
+void ChangeDirCommand::execute() {
+    //No arguments - no effect
+    if (this->numOfArguments == 1) {
+        return;
+    } else if (this->numOfArguments == 2) {
+        //Not NULL for sure
+        char* arg = this->arguments[1];
+        //Backup the current directory
+        char currentPath[PATH_MAX];
+        //getcwd returns NULL if fails.
+        if (!(getcwd(currentPath, PATH_MAX))) {
+            perror("smash error: getcwd failed");
+            return;
+        }
+        char* currentPathPointer = strdup(currentPath);
+        if (*arg == '-') {
+            //The previous directory exists (not null)
+            if (*this->previousPWD) {
+                //Change directory to the previous directory
+                //If chdir fails, -1 is returned.
+                if (chdir(*this->previousPWD) == -1) {
+                    perror("smash error: chdir failed");
+                    return;
+                }
+            } else {
+                //no previous PWD! ERROR!
+                std::cerr << "smash error: cd: OLDPWD not set" << std::endl;
+            }
+        } else {
+            //Change directory to the new given one
+            //If chdir fails, -1 is returned.
+            if (chdir(arg) == -1) {
+                perror("smash error: chdir failed");
+                return;
+            }
+        }
+        //Set the previous directory as the directory we were in before executing
+        delete *this->previousPWD;
+        *this->previousPWD = currentPathPointer;
+    } else {
+        //too many arguments (more than 1)
+        std::cerr << "smash error: cd: too many arguments" << std::endl;
+        return;
+    }
+}
 
 SmallShell::SmallShell() {
     // TODO: add your implementation

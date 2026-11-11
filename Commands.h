@@ -8,7 +8,12 @@
 #define COMMAND_MAX_ARGS (20)
 
 class Command {
+protected:
     // TODO: Add your data members
+    const char* cmdLine;
+    char** arguments;
+    int numOfArguments;
+    
 public:
     Command(const char *cmd_line);
 
@@ -16,6 +21,7 @@ public:
 
     virtual void execute() = 0;
 
+    virtual pid_t getSmashPid() const;
     //virtual void prepare();
     //virtual void cleanup();
     // TODO: Add your extra methods if needed
@@ -94,6 +100,8 @@ public:
 };
 
 class ChangeDirCommand : public BuiltInCommand {
+    
+    char** previousPWD;
     // TODO: Add your data members public:
     ChangeDirCommand(const char *cmd_line, char **plastPwd);
 
