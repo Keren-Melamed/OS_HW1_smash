@@ -5,6 +5,7 @@
 #include <sstream>
 #include <sys/wait.h>
 #include <iomanip>
+#include <regex>
 #include "Commands.h"
 
 //I added this to use PATH_MAX
@@ -154,6 +155,30 @@ void ChangeDirCommand::execute() {
     }
 }
 
+void AliasCommand::execute(){
+    if (this->numOfArguments == 1){
+        SmallShell::getInstance().printAliases();
+    }
+    else{
+        std::regex arg_pattern(R"^alias [a-zA-Z0-9_]+='[^']*'$");
+        if (!std::regex_match(this->cmdLine, arg_pattern)){ //check is in correct format
+            std::cout << "smash error: alias: invalid alias format";
+            return;
+        }
+        int pos = std::string(this->arguments[1]).find('=');
+        std::string alias = this->arguments[1].substr(0, pos);
+        if(dynamic_cast<ExternalCommand*>(SmallShell::CreateCommand(alias)) == nullptr){ //check isn't builtin
+            std::cout << "smash error: alias: " << alias << " already exists or is a reserved command ";
+            return;
+        } 
+        else{
+            std::string cmdLine = this->arguments[1].substr(pos + 1);
+            Command* cmd = SmallShell::getInstance().CreateCommand(cmdLine);
+            SmallShell::getInstance().addAlias(alias, cmd);
+        }
+    }
+}
+
 JobsCommand::execute(){
     
 }
@@ -174,6 +199,10 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
     /*
     string cmd_s = _trim(string(cmd_line));
     string firstWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
+
+    if (self->aliases.contains(firstWord)) {
+        return aliases[firstWord];
+    }
 
     if (firstWord.compare("pwd") == 0) {
       return new GetCurrDirCommand(cmd_line);
@@ -204,4 +233,14 @@ std::string SmallShell::getPrompt(){
 
 void SmallShell::setPrompt(std::string newPrompt){
     this->prompt = newPrompt;
+}
+
+void SmallShell::printAliases(){
+    for (const auto& pair : this->aliases){
+        std::cout << pair.first << "=" << std::string(pair.second->getCmdLine()) << std::endl;
+    }
+}
+
+void SmallShell::addAlias(std::string alias, Command* cmd){
+    this->aliases[alias] = cmd;
 }

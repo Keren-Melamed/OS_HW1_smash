@@ -27,6 +27,7 @@ public:
     //virtual void prepare();
     //virtual void cleanup();
     // TODO: Add your extra methods if needed
+    virtual const char* getCmdLine();
 };
 
 class BuiltInCommand : public Command {
@@ -264,6 +265,7 @@ private:
     // TODO: Add your data members
     std::string prompt = "smash";
     JobsList jobs;
+    std::unordered_map<std::string, Command*> aliases;
     SmallShell();
 
 public:
@@ -286,6 +288,10 @@ public:
     std::string getPrompt();
 
     void setPrompt(std::string newPrompt);
+
+    void printAliases();
+
+    void addAlias();
 };
 
 #endif //SMASH_COMMAND_H_
