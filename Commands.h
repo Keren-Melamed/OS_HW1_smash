@@ -3,6 +3,8 @@
 #define SMASH_COMMAND_H_
 
 #include <vector>
+#include <unordered_map>
+#include <pthread.h>
 
 #define COMMAND_MAX_LENGTH (200)
 #define COMMAND_MAX_ARGS (20)
@@ -99,6 +101,15 @@ public:
     void execute() override;
 };
 
+class ChangePromptCommand : public BuiltInCommand{
+    ChangePromptCommand(const char* cmd_line);
+
+    virtual ~ChangePromptCommand(){
+
+    }
+    void execute() override;
+};
+
 class ChangeDirCommand : public BuiltInCommand {
     
     char** previousPWD;
@@ -150,6 +161,7 @@ public:
     };
 
     // TODO: Add your data members
+    std::vector<JobEntry> jobsList;
 public:
     JobsList();
 
@@ -250,6 +262,8 @@ public:
 class SmallShell {
 private:
     // TODO: Add your data members
+    std::string prompt = "smash";
+    JobsList jobs;
     SmallShell();
 
 public:
@@ -269,6 +283,9 @@ public:
     void executeCommand(const char *cmd_line);
 
     // TODO: add extra methods as needed
+    std::string getPrompt();
+
+    void setPrompt(std::string newPrompt);
 };
 
 #endif //SMASH_COMMAND_H_

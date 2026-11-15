@@ -84,11 +84,28 @@ pid_t Command::getSmashPid() const {
     return getpid();
 }
 
+void ChangePromptCommand::execute(){
+    std::string newPrompt;
+    if (this->numOfArguments == 1){
+        newPrompt = "smash";
+    }
+    else{
+        newPrompt = std::string(this->arguments[1]);
+    }
+    SmallShell::getInstance().setPrompt(newPrompt);
+}
+
 ShowPidCommand::ShowPidCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
 
 void ShowPidCommand::execute() {
     //getpid is always successful
     std::cout << "smash pid is " << getSmashPid() << std::endl;
+}
+
+void GetCurrDirCommand::execute(){
+    char buffer[PATH_MAX];
+    getcwd(buffer, sizeof(buffer));
+    std::cout << buffer << std::endl;
 }
 
 void ChangeDirCommand::execute() {
@@ -137,6 +154,10 @@ void ChangeDirCommand::execute() {
     }
 }
 
+JobsCommand::execute(){
+    
+}
+
 SmallShell::SmallShell() {
     // TODO: add your implementation
 }
@@ -175,4 +196,12 @@ void SmallShell::executeCommand(const char *cmd_line) {
     // Command* cmd = CreateCommand(cmd_line);
     // cmd->execute();
     // Please note that you must fork smash process for some commands (e.g., external commands....)
+}
+
+std::string SmallShell::getPrompt(){
+    return this->prompt;
+}
+
+void SmallShell::setPrompt(std::string newPrompt){
+    this->prompt = newPrompt;
 }
