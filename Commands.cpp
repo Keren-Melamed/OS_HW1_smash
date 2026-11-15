@@ -16,6 +16,8 @@ using namespace std;
 
 const std::string WHITESPACE = " \n\r\t\f\v";
 
+extern char** environ;
+
 #if 0
 #define FUNC_ENTRY()  \
   cout << __PRETTY_FUNCTION__ << " --> " << endl;
@@ -155,32 +157,69 @@ void ChangeDirCommand::execute() {
     }
 }
 
+void JobsCommand::execute(){
+    
+}
+
 void AliasCommand::execute(){
     if (this->numOfArguments == 1){
         SmallShell::getInstance().printAliases();
     }
     else{
-        std::regex arg_pattern(R"^alias [a-zA-Z0-9_]+='[^']*'$");
+        std::regex arg_pattern("^alias [a-zA-Z0-9_]+='[^']*'$");
         if (!std::regex_match(this->cmdLine, arg_pattern)){ //check is in correct format
             std::cout << "smash error: alias: invalid alias format";
             return;
         }
         int pos = std::string(this->arguments[1]).find('=');
-        std::string alias = this->arguments[1].substr(0, pos);
-        if(dynamic_cast<ExternalCommand*>(SmallShell::CreateCommand(alias)) == nullptr){ //check isn't builtin
+        std::string alias = std::string(this->arguments[1]).substr(0, pos);
+        if(dynamic_cast<ExternalCommand*>(SmallShell::getInstance().CreateCommand(alias.c_str())) == nullptr){ //check isn't builtin
             std::cout << "smash error: alias: " << alias << " already exists or is a reserved command ";
             return;
         } 
         else{
-            std::string cmdLine = this->arguments[1].substr(pos + 1);
-            Command* cmd = SmallShell::getInstance().CreateCommand(cmdLine);
+            std::string cmdLine = std::string(this->arguments[1]).substr(pos + 1);
+            Command* cmd = SmallShell::getInstance().CreateCommand(cmdLine.c_str());
             SmallShell::getInstance().addAlias(alias, cmd);
         }
     }
 }
 
-JobsCommand::execute(){
-    
+void UnSetEnvCommand::execute(){
+    if (this->numOfArguments == 1){
+        std::cout << "smash error: unsetenv: not enough arguments" << std::endl;
+        return;
+    }
+    std::string smashPid = std::to_string(this->getSmashPid());
+    std::string envPath = "/proc/" + smashPid + "/environ";
+    FILE *fptr = fopen(envPath.c_str(), "r");
+    char buffer[256];
+    //Env vars are null seperated, so this reads the whole file
+    fgets(buffer, sizeof(buffer), fptr);
+    fclose(fptr);
+    std::vector<std::string> envVars;
+    std::stringstream ss(buffer);
+    std::string envVar;
+    //Get environment variables
+    while(std::getline(ss, envVar, '\0')){
+        int pos = envVar.find('=');
+        envVars.push_back(envVar.substr(0, pos));
+    }
+    for(int i = 1; i < this->numOfArguments; i++){
+        if(std::find(envVars.begin(), envVars.end(), this->arguments[i]) == envVars.end()){
+            std::cout << "smash error: unsetenv:" << this->arguments[i] << "does not exist" << std::endl;
+            return;
+        }
+        int varLen = strlen(this->arguments[i]);
+        for(int j = 0; environ[j] != nullptr; j++){
+            if(strncmp(environ[j], this->arguments[i], varLen) == 0 && environ[j][varLen] == '='){
+                for(int k = j; environ[k] != nullptr; k++){
+                    environ[k] = environ[k+1];
+                }
+                break;
+            }
+        }
+    }
 }
 
 SmallShell::SmallShell() {

@@ -291,7 +291,7 @@ public:
 
     void printAliases();
 
-    void addAlias();
+    void addAlias(std::string alias, Command* cmd);
 };
 
 #endif //SMASH_COMMAND_H_
