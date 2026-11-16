@@ -137,6 +137,317 @@ void ChangeDirCommand::execute() {
     }
 }
 
+AliasCommand::AliasCommand(const char *cmd_line) : BuiltInCommand(cmd_line){
+}
+
+
+void AliasCommand::execute(){
+}
+
+bool AliasCommand::nameReservedOrExists(){
+}
+
+
+UnAliasCommand::UnAliasCommand(const char *cmd_line) : BuiltInCommand(cmd_line){}
+
+void UnAliasCommand::execute(){
+
+    if(numOfArguments == 1){
+        std::cerr << "smash error: unalias: not enough arguments" << std::endl;
+        return;
+    }
+    list<pair<string, string>>*  aliases = SmallShell::getInstance().getExistingAliases();
+
+    if(aliases == nullptr || aliases->empty()){
+        return;
+    }
+
+    for(int i = 1; arguments[i] != nullptr; i++){
+
+        string arg(arguments[i]);
+
+        if(SmallShell::getInstance().isAlias(arg)){
+            SmallShell::getInstance().removeAlias(arg);
+        }
+        else{
+            std::cerr << "smash error: unalias: " << arg << " alias does not exist" << std::endl;
+            return;
+        }
+    }
+    return;
+}
+
+JobsList::JobEntry::JobEntry(int jobID, Command *job_command, pid_t pid){
+    this->jobID = jobID;
+    this->job_command = job_command;
+    this->pid = pid;
+}
+
+void JobsList::JobEntry::printJobEntry(){
+    if(this->job_command == nullptr){
+        return;
+    }
+
+    string cmd = this->job_command->printableCommand();
+
+    std::cout<< "[" << this->jobID <<"]" << cmd << endl;
+}
+
+JobsList::JobsList(){
+    this->jobs_list = new std::list<JobEntry>();
+    numOfJobs = 0;
+}
+
+void JobsList::addJob(Command *cmd, pid_t processID, bool isStopped){
+    if(this->jobs_list == nullptr){
+        return;
+    }
+
+    this->removeFinishedJobs();
+    this->numOfJobs = this->jobs_list->size();
+
+    if(this->jobs_list->empty()){
+        JobEntry entry(1, cmd, processID);
+        entry.isStopped = isStopped;
+        this->jobs_list->push_back(entry);
+        this->numOfJobs = 1;
+    }
+    else{
+        JobEntry entry(this->getLastJob()->jobID + 1, cmd, processID);
+        entry.isStopped = isStopped;
+        this->jobs_list->push_back(entry);
+        this->numOfJobs++;
+    }
+}
+
+void JobsList::printJobsList(){
+    if(this->jobs_list == nullptr){
+        return;
+    }
+
+    this->removeFinishedJobs();
+
+    for(auto& entry : *(this->jobs_list)){
+        if(entry.job_command != nullptr){
+            entry.printJobEntry();
+        }
+    }
+    return;
+}
+
+JobsList::JobEntry* JobsList::getJobById(int jobId){
+    for(auto& entry : *(this->jobs_list)){
+        if(entry.jobID == jobId){
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+void JobsList::removeJobById(int jobId){
+    if (this->jobs_list == nullptr || this->jobs_list->empty()) {
+        return;
+    }
+    auto it = this->jobs_list->begin();
+    while (it != this->jobs_list->end()) {
+        if (it->jobID == jobId) {
+            if (it->job_command != nullptr) {
+                delete it->job_command;
+                it->job_command = nullptr;
+            }
+
+            it = this->jobs_list->erase(it);
+            this->numOfJobs--;
+
+            return;
+        }
+        else {
+            ++it;
+        }
+    }
+}
+
+JobsList::JobEntry* JobsList::getLastJob(){
+    if (this->jobs_list == nullptr || this->jobs_list->empty()) {
+        return nullptr;
+    }
+    return &(this->jobs_list->back());
+}
+
+void JobsList::killAllJobs(){
+    if(this->jobs_list == nullptr){
+        return;
+    }
+
+    for(auto& entry : *(this->jobs_list)){
+        if(kill(entry.pid, SIGKILL) == -1){
+            perror("smash error: kill failed");
+            return;
+        }
+        std::cout << entry.pid << ":" << entry.job_command->printableCommand() << endl;
+    }
+    return;
+
+}
+
+void JobsList::removeFinishedJobs() {
+    if (this->jobs_list == nullptr || this->jobs_list->empty()) {
+        return;
+    }
+
+    auto it = this->jobs_list->begin();
+
+    while (it != this->jobs_list->end()) {
+        int status;
+
+        // Non-blocking check on the job's PID.
+        // WNOHANG: Returns 0 immediately if the child has no new state updates.
+        // WUNTRACED: Reports if a child process was paused (e.g., Ctrl+Z or SIGSTOP).
+        // WCONTINUED: Reports if a paused child was resumed (e.g., SIGCONT).
+        pid_t result = waitpid(it->pid, &status, WNOHANG);
+
+        if (result == 0) {
+            ++it;
+        }
+        else if (result == it->pid) {
+            if (WIFEXITED(status) || WIFSIGNALED(status)) { //exit or SIGKILLed
+                if (it->job_command != nullptr) {
+                    delete it->job_command;
+                    it->job_command = nullptr;
+                }
+                it = this->jobs_list->erase(it);
+                this->numOfJobs--;
+
+            }
+
+            else {
+                ++it;
+            }
+        }
+
+        else if (result == -1) { //process doesnt exist
+            if (it->job_command != nullptr) {
+                delete it->job_command;
+                it->job_command = nullptr;
+            }
+            it = this->jobs_list->erase(it);
+            this->numOfJobs--;
+        }
+    }
+}
+
+ForegroundCommand::ForegroundCommand(const char *cmd_line) : BuiltInCommand(cmd_line){}
+
+void ForegroundCommand::execute(){
+    JobsList::JobEntry* job = nullptr;
+    JobsList* jobs = SmallShell::getInstance().getJobsListPointer();
+
+    if(arguments == nullptr || arguments[2] != nullptr){
+        std::cerr << "smash error: fg: invalid arguments" <<endl;
+    }
+
+    else if(arguments[1] == nullptr){
+        if(jobs == nullptr || jobs->numOfJobs == 0){
+            std::cerr << "smash error: fg: jobs list is empty" <<endl;
+            return;
+        }
+        job = jobs->getLastJob();
+    }
+
+
+    else{
+        int value = this->isNumber(arguments[1]);
+
+        if(value == -1){
+            std::cerr << "smash error: fg: invalid arguments" <<endl;
+            return;
+        }
+
+        job = jobs->getJobById(value);
+        if(job == nullptr){
+            std::cerr << "smash error: fg: job-id " << value << " does not exist" << endl;
+            return;
+        }
+
+    }
+
+    if(job != nullptr){
+        std::cout << job->job_command->printableCommand()<< " " << job->pid << endl;
+
+        if(kill(job->pid, SIGCONT) < 0){
+            perror("smash error: kill failed");
+            return;
+        }
+
+        SmallShell::getInstance().setCurrentForegroundPID(job->pid);
+        int status;
+
+        if(waitpid(job->pid, &status, WUNTRACED) < 0) {
+            perror("smash error: waitpid failed");
+        }
+
+        if(WIFSTOPPED(status)){
+            job->isStopped = true;
+        }
+
+        else{
+            jobs->removeJobById(job->jobID);
+        }
+
+        SmallShell::getInstance().setCurrentForegroundPID(0);
+    }
+
+}
+
+KillCommand::KillCommand(const char *cmd_line) : BuiltInCommand(cmd_line){}
+
+void KillCommand::execute() {
+    if (arguments[1] == nullptr || arguments[2] == nullptr || arguments[3] != nullptr) {
+        std::cerr << "smash error: kill: invalid arguments" << std::endl;
+        return;
+    }
+
+    std::string sig_str(arguments[1]);
+    if (sig_str.empty() || sig_str[0] != '-') {
+        std::cerr << "smash error: kill: invalid arguments" << std::endl;
+        return;
+    }
+
+    std::string sig_num = sig_str.substr(1);
+    std::string job_id(arguments[2]);
+
+    if (sig_num.empty() || this->isNumber(sig_num) == -1 || this->isNumber(job_id) == -1) {
+        std::cerr << "smash error: kill: invalid arguments" << std::endl;
+        return;
+    }
+
+    int signum = this->isNumber(sig_num);
+    int jobID = this->isNumber(job_id);
+
+    JobsList::JobEntry* job = SmallShell::getInstance().getJobsListPointer()->getJobById(jobID);
+
+    if(job == nullptr){
+        std::cerr << "smash error: kill: job-id "<< jobID <<" does not exist" << endl;
+        return;
+    }
+
+    pid_t pid = job->pid;
+    if(kill(pid, signum) == -1){
+        perror("smash error: kill failed");
+        return;
+    }
+
+    if (signum == SIGSTOP || signum == SIGTSTP) {
+        job->isStopped = true;
+    }
+    else if (signum == SIGCONT) {
+        job->isStopped = false; // It has resumed running!
+    }
+
+    std::cout << "signal number " << signum << " was sent to pid " << pid <<endl;
+
+}
+
 SmallShell::SmallShell() {
     // TODO: add your implementation
 }

@@ -3,18 +3,23 @@
 #define SMASH_COMMAND_H_
 
 #include <vector>
+#include <list>
+#include <map>
+#include<regex>
 
 #define COMMAND_MAX_LENGTH (200)
 #define COMMAND_MAX_ARGS (20)
 
 class Command {
 protected:
-    // TODO: Add your data members
     const char* cmdLine;
     char** arguments;
     int numOfArguments;
-    
+    const std::list<std::string>* reserved_commands;
+
+    // TODO: Add your data members
 public:
+
     Command(const char *cmd_line);
 
     virtual ~Command();
@@ -22,6 +27,13 @@ public:
     virtual void execute() = 0;
 
     virtual pid_t getSmashPid() const;
+
+    std::string printableCommand();
+
+    int isNumber(std::string arg); //returns the number if arg is a number, -1 otherwise
+
+    char** removeAmpersandFromArguments(); //removes "&"" from last argument (or as the last argument) if exists and returns the modified arguments array. Replacing removeAmpersand
+    char** getArguments();
     //virtual void prepare();
     //virtual void cleanup();
     // TODO: Add your extra methods if needed
@@ -33,6 +45,48 @@ public:
 
     virtual ~BuiltInCommand() {
     }
+};
+
+class JobsList {
+public:
+    class JobEntry {
+        public:
+            int jobID;
+            Command* job_command;
+            pid_t pid;
+            bool isStopped;
+
+            JobEntry(int jobID, Command *job_command, pid_t pid);
+            virtual ~JobEntry(){}
+            void printJobEntry();
+    };
+
+    std::list<JobEntry>* jobs_list;
+    int numOfJobs;
+
+public:
+
+    JobsList();
+
+    ~JobsList(){}
+
+    void addJob(Command *cmd, pid_t processID, bool isStopped = false);//done
+
+    void printJobsList();//done
+
+    void killAllJobs();
+
+    void removeFinishedJobs();
+
+    JobEntry *getJobById(int jobId); //done
+
+    void removeJobById(int jobId); //done
+
+    JobEntry *getLastJob(); //done
+
+    JobEntry *getLastStoppedJob(int *jobId);
+
+    // TODO: Add extra methods or modify existing ones as needed
 };
 
 class ExternalCommand : public Command {
@@ -131,8 +185,6 @@ public:
     void execute() override;
 };
 
-class JobsList;
-
 class QuitCommand : public BuiltInCommand {
     // TODO: Add your data members public:
     QuitCommand(const char *cmd_line, JobsList *jobs);
@@ -146,32 +198,43 @@ class QuitCommand : public BuiltInCommand {
 class JobsList {
 public:
     class JobEntry {
-        // TODO: Add your data members
+        public:
+            int jobID;
+            Command* job_command;
+            pid_t pid;
+            bool isStopped;
+
+            JobEntry(int jobID, Command *job_command, pid_t pid);
+            virtual ~JobEntry(){}
+            void printJobEntry();
     };
 
-    // TODO: Add your data members
+    std::list<JobEntry>* jobs_list;
+    int numOfJobs;
+
 public:
+
     JobsList();
 
-    ~JobsList();
+    ~JobsList(){}
 
-    void addJob(Command *cmd, bool isStopped = false);
+    void addJob(Command *cmd, pid_t processID, bool isStopped = false);//done
 
-    void printJobsList();
+    void printJobsList();//done
 
     void killAllJobs();
 
     void removeFinishedJobs();
 
-    JobEntry *getJobById(int jobId);
+    JobEntry *getJobById(int jobId); //done
 
-    void removeJobById(int jobId);
+    void removeJobById(int jobId); //done
 
-    JobEntry *getLastJob(int *lastJobId);
+    JobEntry *getLastJob(); //done
 
     JobEntry *getLastStoppedJob(int *jobId);
 
-    // TODO: Add extra methods or modify exisitng ones as needed
+    // TODO: Add extra methods or modify existing ones as needed
 };
 
 class JobsCommand : public BuiltInCommand {
@@ -186,9 +249,10 @@ public:
 };
 
 class KillCommand : public BuiltInCommand {
-    // TODO: Add your data members
+
 public:
-    KillCommand(const char *cmd_line, JobsList *jobs);
+
+    KillCommand(const char *cmd_line);
 
     virtual ~KillCommand() {
     }
@@ -199,31 +263,35 @@ public:
 class ForegroundCommand : public BuiltInCommand {
     // TODO: Add your data members
 public:
-    ForegroundCommand(const char *cmd_line, JobsList *jobs);
 
-    virtual ~ForegroundCommand() {
-    }
+    ForegroundCommand(const char *cmd_line);
+
+    virtual ~ForegroundCommand(){}
 
     void execute() override;
 };
 
 class AliasCommand : public BuiltInCommand {
 public:
+    std::string aliasName;
+    std::string aliasCmd;
     AliasCommand(const char *cmd_line);
 
-    virtual ~AliasCommand() {
-    }
+    virtual ~AliasCommand(){}
 
     void execute() override;
+    void printExistingAliases();
+    bool nameReservedOrExists();
+    bool nameArgumentLegal();
+    
 };
 
 class UnAliasCommand : public BuiltInCommand {
 public:
     UnAliasCommand(const char *cmd_line);
 
-    virtual ~UnAliasCommand() {
-    }
-
+    virtual ~UnAliasCommand(){}
+    
     void execute() override;
 };
 
@@ -250,9 +318,16 @@ public:
 class SmallShell {
 private:
     // TODO: Add your data members
+    char* OLDPWD = nullptr;
+    char* promptMessage;
+    int foregroundPID;
+
     SmallShell();
 
 public:
+    std::list<std::pair<std::string, std::string>>* existing_aliases; //aliases are the keys
+    JobsList* jobs;
+
     Command *CreateCommand(const char *cmd_line);
 
     SmallShell(SmallShell const &) = delete; // disable copy ctor
@@ -267,8 +342,19 @@ public:
     ~SmallShell();
 
     void executeCommand(const char *cmd_line);
+    char** oldPwdPointer();
+    std::list<std::pair<std::string, std::string>>* getExistingAliases();
+    char* getPromptMessage() const;
+
+    void setCurrentForegroundPID(int pid);
+    int getCurrentForegroundPID();
+    JobsList* getJobsListPointer();
+    bool isAlias(std::string name);
+    void removeAlias(const std::string& key_to_remove);
+    std::string getAliasCmdByName(std::string name);
+    
+
 
     // TODO: add extra methods as needed
 };
-
 #endif //SMASH_COMMAND_H_
