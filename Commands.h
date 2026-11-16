@@ -6,6 +6,8 @@
 #include <list>
 #include <map>
 #include<regex>
+#include <unordered_map>
+#include <pthread.h>
 
 #define COMMAND_MAX_LENGTH (200)
 #define COMMAND_MAX_ARGS (20)
@@ -37,6 +39,7 @@ public:
     //virtual void prepare();
     //virtual void cleanup();
     // TODO: Add your extra methods if needed
+    virtual const char* getCmdLine();
 };
 
 class BuiltInCommand : public Command {
@@ -150,6 +153,15 @@ public:
     virtual ~TimeoutCommand() {
     }
 
+    void execute() override;
+};
+
+class ChangePromptCommand : public BuiltInCommand{
+    ChangePromptCommand(const char* cmd_line);
+
+    virtual ~ChangePromptCommand(){
+
+    }
     void execute() override;
 };
 
@@ -318,6 +330,10 @@ public:
 class SmallShell {
 private:
     // TODO: Add your data members
+    std::string prompt = "smash";
+    //JobsList jobs; - theres a linked list of jobs under public
+    std::unordered_map<std::string, Command*> aliases;
+
     char* OLDPWD = nullptr;
     char* promptMessage;
     int foregroundPID;
@@ -326,7 +342,7 @@ private:
 
 public:
     std::list<std::pair<std::string, std::string>>* existing_aliases; //aliases are the keys
-    JobsList* jobs;
+    JobsList* jobs; //HERE
 
     Command *CreateCommand(const char *cmd_line);
 
@@ -356,5 +372,12 @@ public:
 
 
     // TODO: add extra methods as needed
+    std::string getPrompt();
+
+    void setPrompt(std::string newPrompt);
+
+    void printAliases();
+
+    void addAlias(std::string alias, Command* cmd);
 };
 #endif //SMASH_COMMAND_H_

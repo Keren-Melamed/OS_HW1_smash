@@ -5,6 +5,7 @@
 #include <sstream>
 #include <sys/wait.h>
 #include <iomanip>
+#include <regex>
 #include "Commands.h"
 
 //I added this to use PATH_MAX
@@ -14,6 +15,8 @@
 using namespace std;
 
 const std::string WHITESPACE = " \n\r\t\f\v";
+
+extern char** environ;
 
 #if 0
 #define FUNC_ENTRY()  \
@@ -84,11 +87,28 @@ pid_t Command::getSmashPid() const {
     return getpid();
 }
 
+void ChangePromptCommand::execute(){
+    std::string newPrompt;
+    if (this->numOfArguments == 1){
+        newPrompt = "smash";
+    }
+    else{
+        newPrompt = std::string(this->arguments[1]);
+    }
+    SmallShell::getInstance().setPrompt(newPrompt);
+}
+
 ShowPidCommand::ShowPidCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
 
 void ShowPidCommand::execute() {
     //getpid is always successful
     std::cout << "smash pid is " << getSmashPid() << std::endl;
+}
+
+void GetCurrDirCommand::execute(){
+    char buffer[PATH_MAX];
+    getcwd(buffer, sizeof(buffer));
+    std::cout << buffer << std::endl;
 }
 
 void ChangeDirCommand::execute() {
@@ -134,6 +154,71 @@ void ChangeDirCommand::execute() {
         //too many arguments (more than 1)
         std::cerr << "smash error: cd: too many arguments" << std::endl;
         return;
+    }
+}
+
+void JobsCommand::execute(){
+    
+}
+
+void AliasCommand::execute(){
+    if (this->numOfArguments == 1){
+        SmallShell::getInstance().printAliases();
+    }
+    else{
+        std::regex arg_pattern("^alias [a-zA-Z0-9_]+='[^']*'$");
+        if (!std::regex_match(this->cmdLine, arg_pattern)){ //check is in correct format
+            std::cout << "smash error: alias: invalid alias format";
+            return;
+        }
+        int pos = std::string(this->arguments[1]).find('=');
+        std::string alias = std::string(this->arguments[1]).substr(0, pos);
+        if(dynamic_cast<ExternalCommand*>(SmallShell::getInstance().CreateCommand(alias.c_str())) == nullptr){ //check isn't builtin
+            std::cout << "smash error: alias: " << alias << " already exists or is a reserved command ";
+            return;
+        } 
+        else{
+            std::string cmdLine = std::string(this->arguments[1]).substr(pos + 1);
+            Command* cmd = SmallShell::getInstance().CreateCommand(cmdLine.c_str());
+            SmallShell::getInstance().addAlias(alias, cmd);
+        }
+    }
+}
+
+void UnSetEnvCommand::execute(){
+    if (this->numOfArguments == 1){
+        std::cout << "smash error: unsetenv: not enough arguments" << std::endl;
+        return;
+    }
+    std::string smashPid = std::to_string(this->getSmashPid());
+    std::string envPath = "/proc/" + smashPid + "/environ";
+    FILE *fptr = fopen(envPath.c_str(), "r");
+    char buffer[256];
+    //Env vars are null seperated, so this reads the whole file
+    fgets(buffer, sizeof(buffer), fptr);
+    fclose(fptr);
+    std::vector<std::string> envVars;
+    std::stringstream ss(buffer);
+    std::string envVar;
+    //Get environment variables
+    while(std::getline(ss, envVar, '\0')){
+        int pos = envVar.find('=');
+        envVars.push_back(envVar.substr(0, pos));
+    }
+    for(int i = 1; i < this->numOfArguments; i++){
+        if(std::find(envVars.begin(), envVars.end(), this->arguments[i]) == envVars.end()){
+            std::cout << "smash error: unsetenv:" << this->arguments[i] << "does not exist" << std::endl;
+            return;
+        }
+        int varLen = strlen(this->arguments[i]);
+        for(int j = 0; environ[j] != nullptr; j++){
+            if(strncmp(environ[j], this->arguments[i], varLen) == 0 && environ[j][varLen] == '='){
+                for(int k = j; environ[k] != nullptr; k++){
+                    environ[k] = environ[k+1];
+                }
+                break;
+            }
+        }
     }
 }
 
@@ -465,6 +550,10 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
     string cmd_s = _trim(string(cmd_line));
     string firstWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
 
+    if (self->aliases.contains(firstWord)) {
+        return aliases[firstWord];
+    }
+
     if (firstWord.compare("pwd") == 0) {
       return new GetCurrDirCommand(cmd_line);
     }
@@ -486,4 +575,22 @@ void SmallShell::executeCommand(const char *cmd_line) {
     // Command* cmd = CreateCommand(cmd_line);
     // cmd->execute();
     // Please note that you must fork smash process for some commands (e.g., external commands....)
+}
+
+std::string SmallShell::getPrompt(){
+    return this->prompt;
+}
+
+void SmallShell::setPrompt(std::string newPrompt){
+    this->prompt = newPrompt;
+}
+
+void SmallShell::printAliases(){
+    for (const auto& pair : this->aliases){
+        std::cout << pair.first << "=" << std::string(pair.second->getCmdLine()) << std::endl;
+    }
+}
+
+void SmallShell::addAlias(std::string alias, Command* cmd){
+    this->aliases[alias] = cmd;
 }
