@@ -16,6 +16,8 @@ using namespace std;
 
 const std::string WHITESPACE = " \n\r\t\f\v";
 
+const int MAX_ARGS_NUM = 20;
+
 extern char** environ;
 
 #if 0
@@ -82,9 +84,56 @@ void _removeBackgroundSign(char *cmd_line) {
 
 // TODO: Add your implementation for classes in Commands.h 
 
+Command::Command(const char* cmd_line){
+    this->cmdLine = cmd_line;
+    this->arguments = (char**)malloc(MAX_ARGS_NUM * sizeof(char*));
+    this->numOfArguments = _parseCommandLine(cmd_line, this->arguments);
+    // remove '&' if it exists. still stays on cmdLine.
+    _removeBackgroundSign(this->arguments[this->numOfArguments - 1]);
+}
+
+Command::~Command(){
+    for (int i = 0; i < this->numOfArguments; i++){
+        free(this->arguments[i]);
+    }
+    free(this->arguments);
+}
+
 pid_t Command::getSmashPid() const {
     //getpid is always successful
     return getpid();
+}
+
+const char* Command::getCmdLine(){
+    return this->cmdLine;
+}
+
+ExternalCommand::ExternalCommand(const char* cmd_line) : Command(cmd_line){
+
+}
+
+void ExternalCommand::execute(){
+    int pos_wildcard1 = string(this->cmdLine).find('*');
+    int pos_wildcard2 = string(this->cmdLine).find('?');
+    bool isBackground = _isBackgroundComamnd(this->cmdLine);
+    pid_t pid = fork();
+    if (pid == 0){
+        if (pos_wildcard1 == string::npos && pos_wildcard2 == string::npos){
+            execvp(this->arguments[0], this->arguments);
+        }
+        else{
+            // TODO: handle & in cmdLine here
+            execl("/bin/bash", "bash", "-c", this->cmdLine, (char*)nullptr);
+        }
+    }
+    else{
+        if (!isBackground){
+            waitpid(pid, NULL, 0);
+        }
+        else{
+            SmallShell::getInstance().getJobsListPointer()->addJob(this, pid);
+        }
+    }
 }
 
 void ChangePromptCommand::execute(){
@@ -158,7 +207,18 @@ void ChangeDirCommand::execute() {
 }
 
 void JobsCommand::execute(){
-    
+    SmallShell::getInstance().getJobsListPointer()->printJobsList();
+}
+
+void QuitCommand::execute(){
+    if (this->numOfArguments > 1){
+        for(int i = 1; i < this->numOfArguments; i++){
+            if (string(this->arguments[i]) == "kill"){
+                this->jobs->killAllJobs();
+            }
+        }
+    }
+    SmallShell::getInstance().setIsActive(false);
 }
 
 void AliasCommand::execute(){
@@ -225,10 +285,6 @@ void UnSetEnvCommand::execute(){
 AliasCommand::AliasCommand(const char *cmd_line) : BuiltInCommand(cmd_line){
 }
 
-
-void AliasCommand::execute(){
-}
-
 bool AliasCommand::nameReservedOrExists(){
 }
 
@@ -266,6 +322,10 @@ JobsList::JobEntry::JobEntry(int jobID, Command *job_command, pid_t pid){
     this->jobID = jobID;
     this->job_command = job_command;
     this->pid = pid;
+}
+
+JobsList::JobEntry::~JobEntry(){
+    delete this->job_command;
 }
 
 void JobsList::JobEntry::printJobEntry(){
@@ -484,7 +544,7 @@ void ForegroundCommand::execute(){
 
 }
 
-KillCommand::KillCommand(const char *cmd_line) : BuiltInCommand(cmd_line){}
+KillCommand::KillCommand(const char *cmd_line, JobsList *jobs) : BuiltInCommand(cmd_line){}
 
 void KillCommand::execute() {
     if (arguments[1] == nullptr || arguments[2] == nullptr || arguments[3] != nullptr) {
@@ -539,6 +599,7 @@ SmallShell::SmallShell() {
 
 SmallShell::~SmallShell() {
     // TODO: add your implementation
+
 }
 
 /**
@@ -593,4 +654,16 @@ void SmallShell::printAliases(){
 
 void SmallShell::addAlias(std::string alias, Command* cmd){
     this->aliases[alias] = cmd;
+}
+
+JobsList* SmallShell::getJobsListPointer(){
+    return &this->jobs;
+}
+
+bool SmallShell::getIsActive(){
+    return this->isActive;
+}
+
+void SmallShell::setIsActive(bool isActive){
+    this->isActive = isActive;
 }
