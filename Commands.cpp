@@ -2,15 +2,32 @@
 #include <string.h>
 #include <iostream>
 #include <vector>
+#include <map>
 #include <sstream>
+#include <iomanip>
 #include <sys/wait.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
 #include <iomanip>
 #include <regex>
+#include <fcntl.h>
+#include <typeinfo>
+#include <string>
+#include <cstring>
 #include "Commands.h"
 
 //I added this to use PATH_MAX
 #include <limits.h>
 
+
+//for disk usage command
+struct linux_dirent64 {
+    unsigned long  d_ino;
+    unsigned long  d_off;
+    unsigned short d_reclen;
+    unsigned char  d_type;
+    char           d_name[];
+};
 
 using namespace std;
 
@@ -82,10 +99,90 @@ void _removeBackgroundSign(char *cmd_line) {
 
 // TODO: Add your implementation for classes in Commands.h 
 
+Command::~Command() noexcept {}
+
+//The constructor saves the cmdline, and also saves the arguments and the number of the arguments.
+Command::Command(const char *cmd_line) : cmdLine(cmd_line), arguments(new char*[COMMAND_MAX_ARGS]) {
+    this->numOfArguments = _parseCommandLine(cmd_line, this->arguments);
+}
+
+string Command::printableCommand(){
+    string ret;
+    for(int i =0; i < numOfArguments; i++){
+        ret += " ";
+        ret += arguments[i];
+    }
+    return ret;
+}
+
 pid_t Command::getSmashPid() const {
     //getpid is always successful
     return getpid();
 }
+
+const char* Command::getCmdLine(){
+    return this->cmdLine;
+}
+
+int Command::isNumber(string arg){
+    bool isNumber = !arg.empty(); 
+
+    for (char c : arg) {
+        if (!std::isdigit(c)) {
+            isNumber = false;
+            break;
+        }
+    }
+
+    if (isNumber) {
+        return std::stoi(arg);
+    }
+
+    else{
+        return -1;
+    }
+}
+
+char** Command::removeAmpersandFromArguments() {
+    if (this->cmdLine == nullptr) {
+        char** empty_args = (char**) malloc(sizeof(char*));
+        empty_args[0] = nullptr;
+        this->numOfArguments = 0; // Explicitly set to 0 safely
+        return empty_args;
+    }
+    
+    char writable_cmd[COMMAND_MAX_LENGTH];
+    std::strncpy(writable_cmd, this->cmdLine, sizeof(writable_cmd) - 1);
+    writable_cmd[sizeof(writable_cmd) - 1] = '\0';
+
+    const std::string str(writable_cmd);
+    if ((str.find(" &") != std::string::npos)) {
+        this->numOfArguments--;
+    }
+    unsigned int idx = str.find_last_not_of(WHITESPACE);
+
+    if (idx != std::string::npos && writable_cmd[idx] == '&') {
+        writable_cmd[idx] = ' ';
+        writable_cmd[str.find_last_not_of(WHITESPACE, idx) + 1] = 0;
+    }
+    char **clean_args = (char **) malloc(COMMAND_MAX_ARGS * sizeof(char *));
+    std::memset(clean_args, 0, COMMAND_MAX_ARGS * sizeof(char *));
+
+    this->numOfArguments = _parseCommandLine(writable_cmd, clean_args);
+    return clean_args;
+}
+
+char** Command::getArguments(){
+    return this->arguments;
+}
+
+BuiltInCommand::BuiltInCommand(const char *cmd_line) : Command(cmd_line) {
+    this->arguments = this->removeAmpersandFromArguments();
+}
+
+EmptyCommand::EmptyCommand(const char *cmd_line) : Command(cmd_line) {}
+
+void EmptyCommand::execute() {}
 
 void ChangePromptCommand::execute(){
     std::string newPrompt;
@@ -105,11 +202,16 @@ void ShowPidCommand::execute() {
     std::cout << "smash pid is " << getSmashPid() << std::endl;
 }
 
+GetCurrDirCommand::GetCurrDirCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
+
 void GetCurrDirCommand::execute(){
     char buffer[PATH_MAX];
     getcwd(buffer, sizeof(buffer));
     std::cout << buffer << std::endl;
 }
+
+ChangeDirCommand::ChangeDirCommand(const char *cmd_line, char **plastPwd) :
+BuiltInCommand(cmd_line), previousPWD(plastPwd) {}
 
 void ChangeDirCommand::execute() {
     //No arguments - no effect
@@ -157,9 +259,13 @@ void ChangeDirCommand::execute() {
     }
 }
 
+JobsCommand::JobsCommand(const char *cmd_line) : BuiltInCommand(cmd_line){}
+
 void JobsCommand::execute(){
     
 }
+
+AliasCommand::AliasCommand(const char *cmd_line) : BuiltInCommand(cmd_line){}
 
 void AliasCommand::execute(){
     if (this->numOfArguments == 1){
@@ -184,6 +290,8 @@ void AliasCommand::execute(){
         }
     }
 }
+
+UnSetEnvCommand::UnSetEnvCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
 
 void UnSetEnvCommand::execute(){
     if (this->numOfArguments == 1){
@@ -221,17 +329,6 @@ void UnSetEnvCommand::execute(){
         }
     }
 }
-
-AliasCommand::AliasCommand(const char *cmd_line) : BuiltInCommand(cmd_line){
-}
-
-
-void AliasCommand::execute(){
-}
-
-bool AliasCommand::nameReservedOrExists(){
-}
-
 
 UnAliasCommand::UnAliasCommand(const char *cmd_line) : BuiltInCommand(cmd_line){}
 
@@ -533,48 +630,435 @@ void KillCommand::execute() {
 
 }
 
+GetFileTypeCommand::GetFileTypeCommand(const char *cmd_line) : BuiltInCommand(cmd_line){}
+
+void GetFileTypeCommand::execute(){
+
+    if (this->numOfArguments > 1) {
+        perror("smash error: getfiletype: invalid arguments ");
+        return;
+    }
+
+    const char* path = this->arguments[0];
+    struct stat sb;
+    if(lstat(path, &sb) ==-1){
+        perror("smash error: getfiletype: invalid arguments ");
+        return;
+    }
+
+    std::string type;
+    if(S_ISREG(sb.st_mode)){
+        type = "regular file";
+    }
+
+    else if(S_ISDIR(sb.st_mode)){
+        type = "directory";
+    }
+
+    else if(S_ISCHR(sb.st_mode)){
+        type = "character device";
+    }
+
+    else if(S_ISBLK(sb.st_mode)){
+        type = "block device";
+    }
+
+    else if(S_ISFIFO(sb.st_mode)){
+        type = "FIFO";
+    }
+
+    else if(S_ISLNK(sb.st_mode)){
+        type = "symbolic link";
+    }
+
+    else if(S_ISSOCK(sb.st_mode)){
+        type = "socket";
+    }
+    else{
+        perror("smash error: getfiletype: invalid arguments ");
+        return;
+    }
+
+    long long size = sb.st_size;
+
+    std::cout<<path<<"'s type is "<< type <<" and takes up " << size << " bytes";
+    return;
+}
+
+DiskUsageCommand::DiskUsageCommand(const char *cmd_line) : Command(cmd_line), inBackground(false) {
+    std::string last_arg(arguments[this->numOfArguments-1]);
+    if(!last_arg.empty()){
+        //Case 1 - spaces around &, so it is saved as an argument. Change num of arguments.
+        if (last_arg == "&") {
+            this->inBackground = true;
+            free(this->arguments[numOfArguments-1]);
+            this->numOfArguments--;
+        //Case 2 - /home/student&. Remove the & so the path will be valid.
+        } else if (last_arg.back() == '&') {
+            this->inBackground = true;
+            int index = this->numOfArguments - 1;
+            size_t length = strlen(this->arguments[index]);
+            this->arguments[index][length-1] = '\0';
+        }
+    }
+}
+
+unsigned long DiskUsageCommand::calculateDiskSpace(const std::string &path) {
+    //We will use this struct to get information about the path
+    struct stat stFile;
+    //With lstat we fill the stFile stat struct
+    if (lstat(path.c_str(), &stFile) == -1) {
+        perror("smash error: lstat failed");
+        return 0;
+    }
+    //We will sum the number of blocks (blocks are the actual space the file takes on the disk
+    //If the current file is a directory, we should traverse and sum it's blocks.
+    if (!S_ISDIR(stFile.st_mode)) {
+        return stFile.st_blocks;
+    }
+    //Else, the file is a directory, we need to calculate the disk space of the directory as well
+    unsigned long blocksSum = stFile.st_blocks;
+    //Make sure we open a directory
+    int directoryFD = open(path.c_str(), O_RDONLY | O_DIRECTORY);
+    if (directoryFD == -1) {
+        perror("smash error: open failed");
+        return blocksSum;
+    }
+    //Buffer to save information from the directory
+    char buffer[4096];
+    //Keep going until we go over all of the files
+    while (true) {
+        //With getdents system call we can get information about the file.
+        //It does not have a system call format like fork, so we use syscall.
+        long bytesRead = syscall(SYS_getdents64, directoryFD, buffer, sizeof(buffer));
+        if (bytesRead == -1) {
+            perror("smash error: getdents64 failed");
+            return blocksSum;
+        }
+        //We are done reading everything! so we read 0 bytes with getdents.
+        if (bytesRead == 0) {
+            break;
+        }
+        //Save the current position - on the buffer all the files' paths are saved
+        long currentPosition = 0;
+        while (currentPosition < bytesRead) {
+            struct linux_dirent64* currentFile = (struct linux_dirent64*) (buffer + currentPosition);
+            std::string currentFileName = currentFile->d_name;
+            //Skip checking . or .. and avoid calculating every file on the computer!
+            if (currentFileName == "." || currentFileName == "..") {
+                //Move to the next file. reclen is the length of the current file.
+                currentPosition += currentFile->d_reclen;
+                continue;
+            }
+            std::string currentFilePath = path + "/" + currentFileName;
+            //Call recursively
+            blocksSum += calculateDiskSpace(currentFilePath);
+            //Go to the next file
+            currentPosition += currentFile->d_reclen;
+        }
+    }
+    if (close(directoryFD) == -1) {
+        perror("smash error: close failed");
+        return blocksSum;
+    }
+    return blocksSum;
+}
+
+void DiskUsageCommand::execute() {
+    if (numOfArguments > 2) {
+        std::cerr << "smash error: du: too many arguments" << std::endl;
+        return;
+    }
+    //Will hold the path we need to calculate.
+    //We got no arguments, so calculate for the current folder
+    if (numOfArguments == 1) {
+        pathToDU = '.';
+    }
+    //We got an argument!
+    else {
+        pathToDU = arguments[1];
+    }
+    //If we need to run this in the bg
+    if (this->inBackground) {
+        pid_t sonPid = fork();
+        if (sonPid == -1) {
+            perror("smash error: fork failed");
+            return;
+        }
+        //We are the son
+        else if (sonPid == 0) {
+            setpgrp();
+            unsigned long blocksTotal = calculateDiskSpace(pathToDU);
+            //Round up the result as required
+            unsigned long result = (blocksTotal + 1) / 2;
+            std::cout << "Total disk usage: " << result << " KB" << std::endl;
+            exit(0);
+            //Father. Add job to job list!
+        } else {
+            Command * copy = new DiskUsageCommand(this->cmdLine);
+            SmallShell::getInstance().getJobsListPointer()->addJob(copy, sonPid);
+            return;
+        }
+        //The command should run in the foreground
+    } else {
+        unsigned long blocksTotal = calculateDiskSpace(pathToDU);
+        //Round up the result as required
+        unsigned long result = (blocksTotal + 1) / 2;
+        std::cout << "Total disk usage: " << result << " KB" << std::endl;
+    }
+}
+
+ExternalCommand::ExternalCommand(const char *cmd_line) : Command(cmd_line){
+    this->background = false;
+
+    if(_isBackgroundComamnd(cmd_line)){
+        this->background = true;
+    }
+}
+
+void ExternalCommand::execute(){
+    JobsList* jobs = SmallShell::getInstance().getJobsListPointer();
+
+    string cmd_line = this->printableCommand();
+    char* clean_cmd_line = strdup(this->printableCommand().c_str());
+    _removeBackgroundSign(clean_cmd_line);
+    Command* no_ampersand = new ExternalCommand(clean_cmd_line);
+    char** no_amp_args = no_ampersand->getArguments();
+
+    pid_t pid = fork();
+
+    if(pid <0){
+        perror("smash error: fork failed");
+        if(no_ampersand != nullptr) {
+            delete no_ampersand;
+        }
+
+        if(clean_cmd_line != nullptr) {
+            free(clean_cmd_line);
+        }
+        return;
+    }
+
+    if(pid ==0){ //child
+        setpgrp();
+        if(cmd_line.find("*") == std::string::npos && cmd_line.find("?") == std::string::npos){//simple command
+            if(execvp(no_amp_args[0], no_amp_args) == -1){
+                perror("smash error: execvp failed");
+                if(no_ampersand != nullptr) {
+                    delete no_ampersand;
+                }
+
+                if(clean_cmd_line != nullptr) {
+                    free(clean_cmd_line);
+                }
+                _exit(1);
+            }
+        }
+        else{//complex command
+
+            char** bash_args = new char*[4];
+            bash_args[0] = strdup("/bin/bash");
+            bash_args[1] = strdup("-c");
+            bash_args[2] = strdup(clean_cmd_line);
+            bash_args[3] = nullptr;
+
+            if(execv("/bin/bash", bash_args) == -1){
+                perror("smash error: execv failed");
+                this->freeArray(bash_args);
+                //this->freeArray(args_execvp);
+                _exit(1);
+            }
+        }
+    }
+
+    else{//father
+        if(this->background){
+            if(jobs != nullptr){
+                Command* copy = new ExternalCommand(this->cmdLine);
+                jobs->addJob(copy, pid);
+            }
+
+            int status;
+            if(waitpid(pid, &status, WNOHANG)< 0){
+                perror("smash error: waitpid failed");
+            }
+
+        }
+
+        else{
+            SmallShell::getInstance().setCurrentForegroundPID(pid);
+
+            int status;
+            if (waitpid(pid, &status, WUNTRACED) < 0) {
+                perror("smash error: waitpid failed");
+            }
+
+            if (WIFSTOPPED(status)) {
+                if (jobs != nullptr) {
+                    Command* copy = new ExternalCommand(this->cmdLine);
+                    jobs->addJob(copy, pid);
+
+                    // Mark its state status as explicitly stopped in our tracking database
+                    int last_id = jobs->getLastJob()->jobID;
+                    JobsList::JobEntry* entry = jobs->getJobById(last_id);
+                    if (entry != nullptr) {
+                        entry->isStopped = true;
+                    }
+                }
+            }
+
+            SmallShell::getInstance().setCurrentForegroundPID(0);
+        }
+
+        if(no_ampersand != nullptr) {
+            delete no_ampersand;
+        }
+
+        if(clean_cmd_line != nullptr) {
+            free(clean_cmd_line);
+        }
+
+    }
+
+}
+
+void ExternalCommand::freeArray(char** array_to_delete) {
+    if (array_to_delete == nullptr) {
+        return;
+    }
+
+    int i = 0;
+    while (array_to_delete[i] != nullptr) {
+        free(array_to_delete[i]);
+        i++;
+    }
+
+    free(array_to_delete);
+}
+
+
 SmallShell::SmallShell() {
-    // TODO: add your implementation
+    this->promptMessage = new char[COMMAND_MAX_LENGTH];
+    strcpy(this->promptMessage, "smash");
+    this->existing_aliases = new std::list<std::pair<std::string, std::string>>();
+    this->jobs = new JobsList();
 }
 
 SmallShell::~SmallShell() {
     // TODO: add your implementation
+    delete this->OLDPWD;
+    delete this->promptMessage;
+    delete this->existing_aliases;
+    delete this->jobs;
 }
+
 
 /**
 * Creates and returns a pointer to Command class which matches the given command line (cmd_line)
 */
 Command *SmallShell::CreateCommand(const char *cmd_line) {
-    // For example:
-    /*
     string cmd_s = _trim(string(cmd_line));
     string firstWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
 
-    if (self->aliases.contains(firstWord)) {
-        return aliases[firstWord];
+    if (firstWord.compare("alias") == 0 || firstWord.compare("alias&") == 0) {
+        return new AliasCommand(cmd_line);
+    }
+    string expanded_cmd_str ="";
+
+    if (existing_aliases != nullptr && !existing_aliases->empty() && firstWord.compare("alias") != 0) {
+        if(isAlias(firstWord)){
+            string alias_value = getAliasCmdByName(firstWord);
+            string rest_of_line = "";
+
+            size_t first_space_pos = cmd_s.find_first_of(" \n");
+            if(first_space_pos != string::npos){
+                rest_of_line = cmd_s.substr(first_space_pos);
+            }
+
+            expanded_cmd_str = alias_value + rest_of_line;
+            cmd_line = expanded_cmd_str.c_str();
+            cmd_s = _trim(expanded_cmd_str);
+            firstWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
+        }
     }
 
-    if (firstWord.compare("pwd") == 0) {
-      return new GetCurrDirCommand(cmd_line);
+    if (cmd_s.empty()) {
+        return new EmptyCommand(cmd_line);
     }
-    else if (firstWord.compare("showpid") == 0) {
-      return new ShowPidCommand(cmd_line);
+    /*
+    //We found < so we have either < or <<. Either way, it's I/O redirection.
+    if (cmd_s.find(">>") != std::string::npos) {
+        return new RedirectionCommand(cmd_line, true);
     }
-    else if ...
-    .....
-    else {
-      return new ExternalCommand(cmd_line);
+    else if (cmd_s.find('>') != std::string::npos) {
+        return new RedirectionCommand(cmd_line, false);
+    }
+    
+    
+    //We found | so we have either | or |&. Either way, it's Pipe command.
+    if (cmd_s.find("|&") != std::string::npos) {
+        return new PipeCommand(cmd_line, 2, true);
+    }
+    else if (cmd_s.find('|') != std::string::npos) {
+        return new PipeCommand(cmd_line, 1, false);
     }
     */
+
+    if (firstWord.compare("chprompt") == 0 || firstWord.compare("chprompt&") == 0 || firstWord.compare("chprompt &") == 0){
+        //
+    }
+    else if (firstWord.compare("showpid") == 0 || firstWord.compare("showpid&") == 0 || firstWord.compare("showpid &") == 0){
+        return new ShowPidCommand(cmd_line);
+    }
+    else if (firstWord.compare("pwd") == 0 || firstWord.compare("pwd&") == 0) {
+        return new GetCurrDirCommand(cmd_line);
+    }
+    //& can come after the last argument (if there are any)
+    else if (firstWord.compare("cd") == 0 || firstWord.compare("cd&") == 0) {
+      return new ChangeDirCommand(cmd_line, this->oldPwdPointer());
+    }
+    else if (firstWord.compare("unsetenv") == 0 || firstWord.compare("unsetenv&") == 0) {
+        return new UnSetEnvCommand(cmd_line);
+    }
+
+    else if (firstWord.compare("unalias") == 0) {
+        return new UnAliasCommand(cmd_line);
+    }
+    else if (firstWord.compare("jobs") == 0 || firstWord.compare("jobs&") == 0) {
+        //
+    }
+    else if (firstWord.compare("kill") == 0) {
+        return new KillCommand(cmd_line);
+    }
+    else if (firstWord.compare("quit") == 0 || firstWord.compare("quit&") == 0) {
+        //;
+    }
+    else if (firstWord.compare("fg") == 0) {
+        return new ForegroundCommand(cmd_line);
+    }
+    else if (firstWord.compare("du") == 0 || firstWord.compare("du&") == 0) {
+        return new DiskUsageCommand(cmd_line);
+    }
+    /*
+    else if (firstWord.compare("whoami") == 0 || firstWord.compare("whoami&") == 0) {
+        return new WhoAmICommand(cmd_line);
+    }
+    */
+    else {
+        return new ExternalCommand(cmd_line);
+    }
+
     return nullptr;
 }
 
+
 void SmallShell::executeCommand(const char *cmd_line) {
-    // TODO: Add your implementation here
-    // for example:
-    // Command* cmd = CreateCommand(cmd_line);
-    // cmd->execute();
-    // Please note that you must fork smash process for some commands (e.g., external commands....)
+    this->jobs->removeFinishedJobs();
+    Command* cmd = CreateCommand(cmd_line);
+    if(cmd != nullptr){
+        cmd->execute();
+        delete cmd;
+    }
 }
 
 std::string SmallShell::getPrompt(){
@@ -593,4 +1077,71 @@ void SmallShell::printAliases(){
 
 void SmallShell::addAlias(std::string alias, Command* cmd){
     this->aliases[alias] = cmd;
+}
+
+//We return the address of the OLDPWD variable, so we could write to it and change it.
+char** SmallShell::oldPwdPointer() {
+    return &(this->OLDPWD);
+}
+
+//Return the prompt pointer so we could modify it outside the class.
+char* SmallShell::getPromptMessage() const {
+    return this->promptMessage;
+}
+
+void SmallShell::setCurrentForegroundPID(int pid){
+    this->foregroundPID = pid;
+}
+
+int SmallShell::getCurrentForegroundPID(){
+    return this->foregroundPID;
+}
+
+JobsList* SmallShell::getJobsListPointer() {
+    return this->jobs;
+}
+
+bool SmallShell::isAlias(std::string name){
+    for(const auto& pair :*this->existing_aliases){
+        if(name == pair.first){
+            return true;
+        }
+    }
+    return false;
+}
+
+void SmallShell::removeAlias(const std::string& key_to_remove) {
+    if (existing_aliases == nullptr || existing_aliases->empty()) {
+        return;
+    }
+
+    auto it = existing_aliases->begin();
+
+    while (it != existing_aliases->end()) {
+        if (it->first == key_to_remove) {
+            it = existing_aliases->erase(it);
+            break;
+        }
+        else {
+            ++it;
+        }
+    }
+}
+
+string SmallShell::getAliasCmdByName(string name){
+    if (existing_aliases == nullptr || existing_aliases->empty()) {
+        return "";
+    }
+
+    for(auto i = existing_aliases->begin(); i != existing_aliases->end(); ++i){
+        if(i->first.compare(name) == 0){
+            return i->second;
+        }
+
+    }
+    return "";
+}
+
+list<pair<string, string>>* SmallShell::getExistingAliases(){
+    return this->existing_aliases;
 }

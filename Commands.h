@@ -50,6 +50,15 @@ public:
     }
 };
 
+class EmptyCommand : public Command {
+public:
+    EmptyCommand(const char *cmd_line);
+
+    virtual ~EmptyCommand()=default;
+
+    void execute() override;
+};
+
 class JobsList {
 public:
     class JobEntry {
@@ -94,14 +103,16 @@ public:
 
 class ExternalCommand : public Command {
 public:
+    bool background;
+    
     ExternalCommand(const char *cmd_line);
 
-    virtual ~ExternalCommand() {
-    }
+    virtual ~ExternalCommand() {}
+
+    void freeArray(char** arr);
 
     void execute() override;
 };
-
 
 class RedirectionCommand : public Command {
     // TODO: Add your data members
@@ -120,16 +131,6 @@ public:
     PipeCommand(const char *cmd_line);
 
     virtual ~PipeCommand() {
-    }
-
-    void execute() override;
-};
-
-class DiskUsageCommand : public Command {
-public:
-    DiskUsageCommand(const char *cmd_line);
-
-    virtual ~DiskUsageCommand() {
     }
 
     void execute() override;
@@ -166,7 +167,7 @@ class ChangePromptCommand : public BuiltInCommand{
 };
 
 class ChangeDirCommand : public BuiltInCommand {
-    
+public:
     char** previousPWD;
     // TODO: Add your data members public:
     ChangeDirCommand(const char *cmd_line, char **plastPwd);
@@ -207,52 +208,10 @@ class QuitCommand : public BuiltInCommand {
     void execute() override;
 };
 
-class JobsList {
-public:
-    class JobEntry {
-        public:
-            int jobID;
-            Command* job_command;
-            pid_t pid;
-            bool isStopped;
-
-            JobEntry(int jobID, Command *job_command, pid_t pid);
-            virtual ~JobEntry(){}
-            void printJobEntry();
-    };
-
-    std::list<JobEntry>* jobs_list;
-    int numOfJobs;
-
-public:
-
-    JobsList();
-
-    ~JobsList(){}
-
-    void addJob(Command *cmd, pid_t processID, bool isStopped = false);//done
-
-    void printJobsList();//done
-
-    void killAllJobs();
-
-    void removeFinishedJobs();
-
-    JobEntry *getJobById(int jobId); //done
-
-    void removeJobById(int jobId); //done
-
-    JobEntry *getLastJob(); //done
-
-    JobEntry *getLastStoppedJob(int *jobId);
-
-    // TODO: Add extra methods or modify existing ones as needed
-};
-
 class JobsCommand : public BuiltInCommand {
     // TODO: Add your data members
 public:
-    JobsCommand(const char *cmd_line, JobsList *jobs);
+    JobsCommand(const char *cmd_line);
 
     virtual ~JobsCommand() {
     }
@@ -318,14 +277,30 @@ public:
 };
 
 class GetFileTypeCommand : public BuiltInCommand {
+private:
+
 public:
     GetFileTypeCommand(const char *cmd_line);
 
-    virtual ~GetFileTypeCommand() {
-    }
+    virtual ~GetFileTypeCommand() {}
 
     void execute() override;
 };
+
+class DiskUsageCommand : public Command {
+private:
+    std::string pathToDU;
+    bool inBackground;
+public:
+    DiskUsageCommand(const char *cmd_line);
+
+    virtual ~DiskUsageCommand() {
+    }
+
+    void execute() override;
+    unsigned long calculateDiskSpace(const std::string& path);
+};
+
 
 class SmallShell {
 private:
@@ -380,4 +355,5 @@ public:
 
     void addAlias(std::string alias, Command* cmd);
 };
+
 #endif //SMASH_COMMAND_H_
